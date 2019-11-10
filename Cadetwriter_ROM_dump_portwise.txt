@@ -1,0 +1,62 @@
+[This alternative was rejected. Preserved here in case it's of interest someday.]
+
+If we stick with the Teensyduino environment (as used by Cadetwriter), the native I/O instructions (digitalWrite, digitalRead) operate one bit at a time. That's fine for the control signals, but not especially convenient for the ADDR/DATA bus. Turns out we can access the GPIO registers directly, 32 bits wide. We just have to figure out which pins map to which bits. If we only consider the bits that come out to pins on the Teensy 3.5, no one of the GPIO ports has enough pins for our purposes. We will stitch together bits from ports B, C, and D in the most convenient way we can manage. We also have to cope with the fact that the port bits don't map onto pin numbers in any systematic way. By checking the Teensy 3.5 schematic we can figure out how they do map.
+
+There's an explanation of port access here:
+https://forum.pjrc.com/threads/17532-Tutorial-on-digital-I-O-ATMega-PIN-PORT-DDR-D-B-registers-vs-ARM-GPIO_PDIR-_PDOR?p=21228&viewfull=1#post21228
+
+Here are the pin assignments I've chosen:
+
+Signal Name     MX64 GPIO   Teensy pin  V20 pin
+A0              PTD0        2           16
+A1              PTD1        14          15
+A2              PTD2        7           14
+A3              PTD3        8           13
+A4              PTD4        6           12
+A5              PTD5        20          11
+A6              PTD6        21          10
+A7              PTD7        5           9
+
+A8              PTC0        15          8
+A9              PTC1        22          7
+A10             PTC2        23          6
+A11             PTC3        9           5
+A12             PTC4        10          4
+A13             PTC5        13          3
+A14             PTC6        11          2
+A15             PTC7        12          39
+
+A16             PTB0        16          38
+A17             PTB1        17          37
+A18             PTB2        19          36
+A19             PTB3        18          35
+
+BUFEN/          PTB10       31          26
+BUFR/W          PTB11       32          27
+ASTB            PTB16       0           25
+RD/             PTB17       1           32
+
+HLDRQ           PTC8        35          31
+HLDAK           PTC9        36          30
+WR/             PTC10       37          29
+IO/M/           PTC11       38          28
+
+VCC             N/A         Vin         40
+GND             N/A         GND         20
+
+unused          PTB18       29
+unused          PTB19       30
+unused          PTA5        25
+unused          PTA12       3
+unused          PTA13       4
+unused          PTA14       26
+unused          PTA15       27
+unused          PTA16       28
+unused          PTA17       39
+unused          PTE24       33
+unused          PTE25       34
+unused          PTE26       24
+
+As you can see, the least significant byte of the address bus, which is also the data bus, is mapped (in order) to the least significant byte of port D. The next byte is mapped (in order) to the least significant byte of port C. The remaining half-byte of the address bus is mapped (in order) to the least significant half-byte of port B. This is about as nice as it's going to get. Unfortunately, the pins on the Teensy are all scrambled up. Note that A13 is hooked up to the pin that's also the LED on the Teensy. That shouldn't be a problem. In fact, it should be handy as an indication that the program is running.
+
+Alternatively, it seems like the port-level access is fraught with complications. It might be safer to just use the pinwise I/O primitives and take the hit on code ugliness and speed. As compensation, we can arrange for the hookup wiring to be more straightforward. Just map the physical location of pins on the V20 to the physical location of pins on the Teensy.

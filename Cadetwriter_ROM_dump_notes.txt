@@ -1,0 +1,148 @@
+Dump the Wheelwriter 1000 ROM using a Teensy 3.5
+2019-11-09 Paul Williamson paul@mustbeart.com
+
+In order to more fully understand the native behavior of the Wheelwriter 1000 typewriter that serves as the basis for the CadetWriter, it should be useful to extract the code from the Wheelwriter logic board's ROM. The Wheelwriter logic board is based on an NEC V20 microprocessor, which is similar to an Intel 8088, with a 20-bit physical address bus and 8-bit physical data bus (shared with the least significant byte of the address bus). The system RAM, ROM, and I/O are all external to the processor.
+
+We have not been able to locate a schematic diagram for the Wheelwriter 1000 logic board, and the memory devices on the board don't bear any part number markings that we can recognize. The chips that must be the RAM and ROM chips are soldered surface mount devices, so they would not be easy to disconnect. The V20 is also soldered down, but it is a DIP package. With the help of a relatively inexpensive "DIP clip", it should be easy to connect to all the pins of the microprocessor.
+
+https://www.amazon.com/Test-Clip-Thru_hole-3M-Clips/dp/B0047CYKHQ/
+
+The V20 is capable of sharing its bus with other processors, so it should be simple to connect a device in parallel with the V20 chip and access the ROM in the same way the V20 does. This doesn't require understanding the rest of the circuit, just the datasheet behavior of the V20 itself, which is well documented. In order to implement this plan, we need a programmable device with enough 5V-compatible I/O pins and some capability to output or save results. As it happens, the Teensy 3.5 board that every CadetWriter already contains fits the bill. All we have to do is remove the Teensy from the serial interface board (or use a spare Teensy) and wire up some of the pins to the needed pins on the DIP clip. The logic board can remain in the typewriter and obtain its power from the existing power supply. We can also power the Teensy from the typewriter's power supply, just as we do in the standard CadetWriter configuration.
+
+The Teensy then has to be programmed to roughly emulate the V20 memory read cycle, for each address in the ROM. We don't know the ROM size. We do know that the V20's address space is one megabyte and that the ROM must occupy the top of memory. We can punt on trying to guess the ROM size by simply capturing the entire address space, including RAM, ROM, and unmapped areas if any. This might be useful later as a way of snapshotting the RAM state for debug. We are assuming just two things about the logic board circuit design: that the bus hold request signal HLDRQ is not hard-wired to GND, and that there is no memory-mapped output that might do something destructive on a read cycle.
+
+The Teensy doesn't have enough RAM to buffer all those bytes, but it does have a built-in micro SD card slot, so we'll dump the results there in raw binary.
+
+https://github.com/greiman/SdFat/blob/master/examples/TeensySdioDemo/TeensySdioDemo.ino
+
+Each read bus cycle goes like this:
+    should start with BUFEN/ high; BUFR/W low; ASTB low; RD/ high
+    ASTB high and 20-bit address on A0-A19
+    ASTB low
+    RD/ low and tri-state A0-A7 (these are also the data bus)
+    BUFEN/ low
+    wait long enough
+    sample A0-A7 (that's the data we want)
+    BUFEN/ high; RD/ high
+
+These events normally happen on the V20's clock, but unless the circuit design is unusual these can all happen at pretty much any speed, except the wait for memory access, which is paced by the speed of the ROM device. The smallest convenient delay in the Teensy (1 microsecond) is already plenty long for memory of this vintage, so we'll try that.
+
+The four control signals mentioned above, the 20 ADDR/DATA lines, and the HLDRQ and HLDAK pins required for sharing the bus, are all we need to actively manage with the Teensy. Plus power and ground, of course, and we probably ought to hold WR/ high and IO/M/ low. If we stick with the Teensyduino environment (as used by CadetWriter), the native I/O instructions (digitalWrite, digitalRead) operate one bit at a time. There may be a small speed penalty, but that won't be significant for this application. This leaves us relatively free to wire up the pins in the most physically convenient way. We can simply map the pins on the left side of the V20 to pins on the left side of the Teensy, in the same order, and likewise for the right side. They won't be perfectly one-to-one, because not all Teensy pins are usable and not all V20 pins need to be connected. Also, GND is out of order. The pin assignments are as follows:
+
+Signal Name		V20 pin		Teensy pin
+A14				2				0
+A13				3				1
+A12				4				2
+A11				5				3
+A10				6				4
+A9				7				5
+A8				8				6
+A7				9				7
+A6				10				8
+A5				11				9
+A4				12				10
+A3				13				11
+A2				14				12
+A1				15				24
+A0				16				25
+unused							26-32
+GND				20				GND
+
+ASTB			25				33
+BUFEN/			26				34
+BUFR/W			27				35
+IO/M/			28				36
+WR/				29				37
+HLDAK			30				38
+HLDRQ			31				39
+RD/				32				14
+
+A19				35				15
+A18				36				16
+A17				37				17
+A16				38				18
+A15				39				19
+VDD				40				Vin
+
+unused							20-23
+
+Note that we've skipped Teensy pin 13, which is used for the built-in LED. We'll light up the LED while the dump operation is running.
+
+Here's some code that turns the random pins into wide bus operations:
+
+// Teensy pin mapping of address/data bus starting from the LSB
+int bus_pins = { 25,24,12,11,10,9,8,7,6,5,4,3,2,1,0,19,18,17,16,15 };
+
+void drive_address(unsigned long addr) {
+	for (int i=0; i < 20; i++) {
+		pinMode(bus_pins[i], OUTPUT);
+		digitalWrite(bus_pins[i], !!(addr & (1UL << i)));
+	}
+}
+
+void tristate_data_pins(void) {
+	for (int i=0; i < 8; i++) {
+		pinMode(bus_pins[i], INPUT);
+	}
+}
+
+byte read_data(void) {
+	byte val = 0;
+
+	for (int i=0; i < 8; i++) {
+		if (digitalRead(bus_pins[i])) {
+			val |= (1 << i);
+		}
+	}
+	
+	return val;
+}
+
+
+User interface
+
+We don't need much in the way of a user interface for the ROM dump program. We could just start dumping on powerup, but for the secondary application of snapshotting RAM, we need to be able to control when the snapshot is taken. We'll use the USB serial console from the Teensy.
+
+
+Operating steps:
+
+Wire up the Teensy to the DIP clip
+Insert a formatted SD card into the Teensy
+Turn off the CadetWriter
+Open up the CadetWriter to reveal the logic board
+Clip the DIP clip onto the V20 chip on the logic board
+Turn on the CadetWriter
+Connect the Teensy to a host computer via USB
+Program the Teensy with the sketch (if not already programmed)
+Run the serial monitor or a terminal program to interact with Teensy
+If interested in RAM, operate the CadetWriter to get into the state of interest
+Hit Enter on the host computer to initiate a dump
+Wait for a completion message on the serial monitor
+Repeat last X steps if more captures are desired
+Turn off the CadetWriter
+Remove the SD card from the Teensy
+Copy the resulting files off the SD card
+
+
+Teensy Code Outline
+
+The overall structure of the Teensy code looks like this:
+
+    enable HLDRQ as an output and set it low
+    wait for console user to hit Enter
+    set HLDRQ high
+    wait for HLDAK to go high (should be quick)
+    light the built-in LED
+    enable all the signals (except HLDAK) as outputs
+    initialize the control signals as described above
+    open a new file for output (pick a new unique name)
+    for address = 0x00000 to 0x3FFFF
+        perform the bus cycle outlined above
+        write the resulting byte to the file
+    close the file
+    disable all the output signals (except HLDRQ)
+    set HLDRQ low
+    wait for HLDQK to go low (should be quick)
+    turn off the built-in LED
+    issue completion message to console
+    loop back to wait for console user to hit Enter
