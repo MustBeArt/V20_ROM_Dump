@@ -257,6 +257,8 @@ void setup() {
 
   pinMode(HLDAK, INPUT);    // We will need to check that the V20 gives up the bus
   
+  pinMode(LED_BUILTIN, OUTPUT); // We'll also be lighting up the Teensy's LED
+
   // Set up the SD card to accept our dumped data
   if (!sd.begin()) {
     Serial.println("SD card not working!");
