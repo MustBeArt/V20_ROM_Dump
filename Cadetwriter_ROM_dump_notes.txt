@@ -106,6 +106,7 @@ We don't need much in the way of a user interface for the ROM dump program. We c
 
 Operating steps:
 
+CUT the tiny jumper on the bottom of the Teensy that connects to USB power
 Wire up the Teensy to the DIP clip
 Insert a formatted SD card into the Teensy
 Turn off the CadetWriter
