@@ -52,23 +52,23 @@
  *  unused                 26-32
  *  GND            20       GND
  *
- *  ASTB           25        33
- *  BUFEN/         26        34
- *  BUFR/W         27        35
- *  IO/M/          28        36
- *  WR/            29        37
- *  HLDAK          30        38
- *  HLDRQ          31        39
- *  RD/            32        14
+ *  ASTB           25        37
+ *  BUFEN/         26        38
+ *  BUFR/W         27        39
+ *  IO/M/          28        14
+ *  WR/            29        15
+ *  HLDAK          30        16
+ *  HLDRQ          31        17
+ *  RD/            32        18
  *
- *  A19            35        15
- *  A18            36        16
- *  A17            37        17
- *  A16            38        18
- *  A15            39        19
+ *  A19            35        19
+ *  A18            36        20
+ *  A17            37        21
+ *  A16            38        22
+ *  A15            39        23
  *  VDD            40       Vin
  *
- *  unused                 20-23
+ *  unused                 33-36
  *
  *  Note that we've skipped Teensy pin 13, which is used for the built-in LED
  * 
@@ -126,17 +126,17 @@
 #define DATA_BUS_WIDTH       8
 
 // Teensy pin definitions
-#define ASTB      33
-#define BUFEN     34
-#define BUFRW     35
-#define IOMEM     36
-#define WR        37
-#define HLDAK     38
-#define HLDRQ     39
-#define RD        14
+#define ASTB      37
+#define BUFEN     38
+#define BUFRW     39
+#define IOMEM     14
+#define WR        15
+#define HLDAK     16
+#define HLDRQ     17
+#define RD        18
 
 // Teensy pin mapping of address/data bus starting from the LSB
-int bus_pins[] = { 25,24,12,11,10,9,8,7,6,5,4,3,2,1,0,19,18,17,16,15 };
+int bus_pins[] = { 25,24,12,11,10,9,8,7,6,5,4,3,2,1,0,23,22,21,20,19 };
 
 SdFatSdioEX sd;
 File dumpfile;
