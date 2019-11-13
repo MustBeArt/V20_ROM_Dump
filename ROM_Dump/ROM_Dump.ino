@@ -154,7 +154,7 @@ void next_file(void) {
     Serial.println("Too many files for our naming convention. Clean off the SD card!");
     while (1);  // panic
   }
-  sprintf(filename+5, "%03d", file_number);
+  sprintf(filename, "CWMEM%03d.BIN", file_number);
 }
 
 
@@ -247,8 +247,10 @@ byte bus_read_cycle(unsigned long address) {
 // Standard Arduino setup routine, runs once on powerup
 void setup() {
 
+  delay(1000);              // This seems necessary, but why?
+  
   Serial.begin(9600);       // We will interact with the user on the USB serial port
-  Serial.println("Cadetwriter ROM dumper 0.1");
+  Serial.println("Cadetwriter ROM dumper 0.2");
   
   pinMode(HLDRQ, OUTPUT);   // We will take permanent charge of the bus hold request line
   digitalWrite(HLDRQ, BUS_RELEASE);     // Let the V20 keep the bus for now
@@ -281,8 +283,8 @@ void setup() {
 void loop() {
   File dumpfile;
 
-  Serial.println("\n\n\n\nHit Enter to dump the entire address space to a file.");
-  while (!Serial.available() || Serial.read() != '\r');
+  Serial.println("\n\nHit Enter to dump the entire address space to a file.");
+  while (!Serial.available() || Serial.read() != '\n');
 
   Serial.print("Seizing the bus ... ");
   digitalWrite(HLDRQ, BUS_HOLD);
@@ -301,8 +303,10 @@ void loop() {
     while (1);      // hang forever, don't try to recover.
   }
 
+  Serial.println("Dumping ...");
+
   // Do the actual data dump, writing the results in raw binary to the file
-  for (unsigned long addr=0; addr < 0x3FFFFul; addr++) {
+  for (unsigned long addr=0; addr <= 0xFFFFFul; addr++) {
     dumpfile.write(bus_read_cycle(addr));   // ignoring any errors here.
   }
 
