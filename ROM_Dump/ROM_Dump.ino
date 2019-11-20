@@ -231,6 +231,7 @@ byte bus_read_cycle(unsigned long address) {
 
   drive_address(address);
   digitalWrite(ASTB, HIGH);   // ASTB pulses high
+  delayMicroseconds(1);       // need some duration on the address strobe
   digitalWrite(ASTB, LOW);    // external address latch on this edge
   tristate_data_pins();       // free up the data bus for the memory read
   digitalWrite(RD, LOW);      // start reading the memory device
@@ -247,7 +248,7 @@ byte bus_read_cycle(unsigned long address) {
 // Standard Arduino setup routine, runs once on powerup
 void setup() {
 
-  delay(1000);              // This seems necessary, but why?
+  delay(5000);              // This seems necessary, but why?
   
   Serial.begin(9600);       // We will interact with the user on the USB serial port
   Serial.println("Cadetwriter ROM dumper 0.2");
@@ -321,6 +322,7 @@ void loop() {
 
   // Release the bus to the V20
   Serial.print("Releasing the bus ... ");
+  bus_state_not_driven();
   digitalWrite(HLDRQ, BUS_RELEASE);
   while (digitalRead(HLDAK) == BUS_ACK);
   Serial.println("ok");
