@@ -1,6 +1,9 @@
 # V20_ROM_Dump
-Teensy 3.5 Arduino sketch for dumping the memory of a small-scale NEC V20-based system,
-such as the IBM Wheelwriter 1000 typewriter upon which the Cadetwriter is based.
+Failed attempt at a Teensy 3.5 Arduino sketch for dumping the memory of a
+small-scale NEC V20-based system, such as the IBM Wheelwriter 1000 typewriter 
+upon which the Cadetwriter is based. The attempt failed because it turns out
+the glue logic chip on the Wheelwriter 1000 logic board interferes with this
+method of accessing the ROM.
 
 For detailed design notes, see Cadetwriter_ROM_dump_notes.txt
 

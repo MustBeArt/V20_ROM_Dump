@@ -1,6 +1,10 @@
 Dump the Wheelwriter 1000 ROM using a Teensy 3.5
 2019-11-09 Paul Williamson paul@mustbeart.com
 
+-------------------------
+Update 2019-11-27: this was a failed attempt. It turns out the behavior of the glue logic chip on the Wheelwriter 1000 logic board interferes fatally with this proposed method.
+-------------------------
+
 In order to more fully understand the native behavior of the Wheelwriter 1000 typewriter that serves as the basis for the CadetWriter, it should be useful to extract the code from the Wheelwriter logic board's ROM. The Wheelwriter logic board is based on an NEC V20 microprocessor, which is similar to an Intel 8088, with a 20-bit physical address bus and 8-bit physical data bus (shared with the least significant byte of the address bus). The system RAM, ROM, and I/O are all external to the processor.
 
 We have not been able to locate a schematic diagram for the Wheelwriter 1000 logic board, but we can see from visual inspection that it has a KM62256BLG-10L supplying 32K of RAM and a KM23C1010G-15 supplying 128K of masked ROM. The RAM and ROM chips are soldered surface mount devices, so they would not be easy to disconnect. The V20 is also soldered down, but it is a DIP package. With the help of a relatively inexpensive "DIP clip", it should be easy to connect to all the pins of the microprocessor.
@@ -10,6 +14,8 @@ https://www.amazon.com/Test-Clip-Thru_hole-3M-Clips/dp/B0047CYKHQ/
 The V20 is capable of sharing its bus with other processors, so it should be simple to connect a device in parallel with the V20 chip and access the ROM in the same way the V20 does. This doesn't require understanding the rest of the circuit, just the datasheet behavior of the V20 itself, which is well documented. In order to implement this plan, we need a programmable device with enough 5V-compatible I/O pins and some capability to output or save results. As it happens, the Teensy 3.5 board that every CadetWriter already contains fits the bill. All we have to do is remove the Teensy from the serial interface board (or use a spare Teensy) and wire up some of the pins to the needed pins on the DIP clip. The logic board can remain in the typewriter and obtain its power from the existing power supply. We can also power the Teensy from the typewriter's power supply, just as we do in the standard CadetWriter configuration.
 
 The Teensy then has to be programmed to roughly emulate the V20 memory read cycle, for each address in the ROM. We know the ROM in a V20 system must occupy the top of memory, so we could just dump the top 128K. However, it is easy enough to simply capture the entire address space, including RAM, ROM, and unmapped areas. This might be useful later as a way of snapshotting the RAM state for debug. We are assuming just two things about the logic board circuit design: that the bus hold request signal HLDRQ is not hard-wired to GND, and that there is no memory-mapped output that might do something destructive on a read cycle. A multimeter indicates that HLDRQ is pulled down to ground with a 1K resistor, so that should not be a problem.
+
+There is one problem with this method: the address strobe ASTB signal from the V20 is not tristated when the V20 releases the bus. Apparently each bus master is supposed to have its own address latches, if it needs them. In order to work around this problem, we must disconnect the ASTB pin on the V20 from the logic board, and combine that ASTB with the ASTB from the Teensy with an OR gate, which in turns drives the net on the logic board.
 
 The Teensy doesn't have enough RAM to buffer all those bytes, but it does have a built-in micro SD card slot, so we'll dump the results there in raw binary.
 
@@ -48,7 +54,7 @@ A0				16				25
 unused							26-32
 GND				20				GND
 
-ASTB			25				37
+ASTB			25				37 (through an OR gate as mentioned above)
 BUFEN/			26				38
 BUFR/W			27				39
 IO/M/			28				14
@@ -67,36 +73,6 @@ VDD				40				Vin
 unused							33-36
 
 Note that we've skipped Teensy pin 13, which is used for the built-in LED. We'll light up the LED while the dump operation is running.
-
-Here's some code that turns the random pins into wide bus operations:
-
-// Teensy pin mapping of address/data bus starting from the LSB
-int bus_pins = { 25,24,12,11,10,9,8,7,6,5,4,3,2,1,0,23,22,21,20,19 };
-
-void drive_address(unsigned long addr) {
-	for (int i=0; i < 20; i++) {
-		pinMode(bus_pins[i], OUTPUT);
-		digitalWrite(bus_pins[i], !!(addr & (1UL << i)));
-	}
-}
-
-void tristate_data_pins(void) {
-	for (int i=0; i < 8; i++) {
-		pinMode(bus_pins[i], INPUT);
-	}
-}
-
-byte read_data(void) {
-	byte val = 0;
-
-	for (int i=0; i < 8; i++) {
-		if (digitalRead(bus_pins[i])) {
-			val |= (1 << i);
-		}
-	}
-	
-	return val;
-}
 
 
 User interface
@@ -127,7 +103,7 @@ Copy the resulting files off the SD card
 
 Teensy Code Outline
 
-The overall structure of the Teensy code looks like this:
+The overall structure of the Teensy code might look like this:
 
     enable HLDRQ as an output and set it low
     wait for console user to hit Enter
@@ -137,7 +113,7 @@ The overall structure of the Teensy code looks like this:
     enable all the signals (except HLDAK) as outputs
     initialize the control signals as described above
     open a new file for output (pick a new unique name)
-    for address = 0x00000 to 0x3FFFF
+    for address = 0x00000 to 0xFFFFF
         perform the bus cycle outlined above
         write the resulting byte to the file
     close the file
@@ -145,5 +121,27 @@ The overall structure of the Teensy code looks like this:
     set HLDRQ low
     wait for HLDQK to go low (should be quick)
     turn off the built-in LED
+    issue completion message to console
+    loop back to wait for console user to hit Enter
+
+However, it appears that the glue logic chip won't put up with the V20 being off the bus for so long. Probably, a watchdog timer expires. So, instead, we will only steal the bus for one cycle at a time:
+
+    enable HLDRQ as an output and set it low
+    wait for console user to hit Enter
+    enable all the signals (except HLDAK) as outputs
+    initialize the control signals as described above
+    open a new file for output (pick a new unique name)
+    for address = 0x00000 to 0xFFFFF
+        set HLDRQ high
+        wait for HLDAK to go high (should be quick)
+        light the built-in LED
+        perform the bus cycle outlined above
+        disable all the output signals (except HLDRQ)
+        set HLDRQ low
+        wait for HLDQK to go low (should be quick)
+        turn off the built-in LED
+        write the resulting byte to the file
+        maybe wait a while for the V20 to run some code
+    close the file
     issue completion message to console
     loop back to wait for console user to hit Enter

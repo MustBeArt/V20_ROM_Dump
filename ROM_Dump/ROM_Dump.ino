@@ -1,3 +1,7 @@
+// Update: this never worked, and never will work. It turns out the
+// glue chip on the Wheelwriter 1000 logic board interferes with
+// this method of accessing the ROM.
+
 /*****************************************************************************
  * 
  *  Dump the ROM (and RAM) from a Cadetwriter (IBM Wheelwriter 1000)
@@ -52,7 +56,7 @@
  *  unused                 26-32
  *  GND            20       GND
  *
- *  ASTB           25        37
+ *  ASTB           25        37 (see circuit description below)
  *  BUFEN/         26        38
  *  BUFR/W         27        39
  *  IO/M/          28        14
@@ -72,14 +76,19 @@
  *
  *  Note that we've skipped Teensy pin 13, which is used for the built-in LED
  * 
- * 
- *  Operating steps:
+ *  ASTB is not tristated by the V20 when the bus is held. In order to assert
+ *  ASTB without conflict, we have to add an OR gate between the V20's ASTB pin
+ *  and the ASTB signal on the Wheelwriter's logic board. Then we can wire our
+ *  own ASTB signal (from Teensy pin 37) to the other input of the OR gate.
  *
- *  Wire up the Teensy to the DIP clip
+ *   Operating steps:
+ *  
+ *  (assuming the target has already been modified)
+ *  Wire up the Teensy to the DIP clip, and ASTB OR gate.
  *  Insert a formatted SD card into the Teensy
  *  Turn off the Cadetwriter
  *  Open up the Cadetwriter to reveal the logic board (see adaptation guide)
- *  Clip the DIP clip onto the V20 chip on the logic board
+ *  Clip the DIP clip onto the V20 chip on the logic board and hook up ASTB
  *  Turn on the Cadetwriter
  *  Connect the Teensy to a host computer via USB
  *  Program the Teensy with this sketch (if not already programmed)
@@ -100,7 +109,9 @@
  *  from which the Teensy 3.5 has been removed (so you can re-use the same
  *  Teensy for this operation if you don't have a spare handy).
  *  
- *  In fact, it should work on just about any small-scale V20-based system.
+ *  In fact, it should work on just about any small-scale V20-based system,
+ *  after the ASTB modification.
+ * 
  *  The wiring table depends on the V20 being in a DIP package and the
  *  BUSRQ signal not being actively driven or tied to ground.
  * 
@@ -202,7 +213,7 @@ byte read_data(void) {
 void bus_state_driven_idle(void) {  
   digitalWrite(BUFEN, HIGH);    pinMode(BUFEN, OUTPUT);
   digitalWrite(BUFRW, LOW );    pinMode(BUFRW, OUTPUT);
-  digitalWrite(ASTB,  LOW );    pinMode(ASTB, OUTPUT);
+//  digitalWrite(ASTB,  LOW );    pinMode(ASTB, OUTPUT);
   digitalWrite(RD,    HIGH);    pinMode(RD, OUTPUT);
   digitalWrite(WR,    HIGH);    pinMode(WR, OUTPUT);
   digitalWrite(IOMEM, LOW );    pinMode(IOMEM, OUTPUT);
@@ -213,7 +224,7 @@ void bus_state_driven_idle(void) {
 void bus_state_not_driven(void) {
   pinMode(BUFEN, INPUT);
   pinMode(BUFRW, INPUT);
-  pinMode(ASTB, INPUT);
+//  pinMode(ASTB, INPUT);
   pinMode(RD, INPUT);
   pinMode(WR, INPUT);
   pinMode(IOMEM, INPUT);
@@ -245,19 +256,47 @@ byte bus_read_cycle(unsigned long address) {
 }
 
 
+// Perform a single DMA read cycle on the bus and return
+// the result. That is, take control of the bus for only a
+// single operation and immediately release it.
+byte bus_read_dma_cycle(unsigned long address) {
+  byte value;
+
+  // hold the bus
+  digitalWrite(HLDRQ, BUS_HOLD);
+  while (digitalRead(HLDAK) != BUS_ACK);
+  digitalWrite(LED_BUILTIN, HIGH);    // a little feedback on the hardware
+
+  // do one read cycle
+  bus_state_driven_idle();  // take over the control signals on the bus
+  value = bus_read_cycle(address);
+  bus_state_not_driven();
+
+  // release the bus
+  digitalWrite(HLDRQ, BUS_RELEASE);
+  while (digitalRead(HLDAK) == BUS_ACK);
+  digitalWrite(LED_BUILTIN, LOW);    // a little feedback on the hardware
+
+  return value;
+}
+
+
 // Standard Arduino setup routine, runs once on powerup
 void setup() {
 
   delay(5000);              // This seems necessary, but why?
   
   Serial.begin(9600);       // We will interact with the user on the USB serial port
-  Serial.println("Cadetwriter ROM dumper 0.2");
+  Serial.println("Cadetwriter ROM dumper 0.3");
   
   pinMode(HLDRQ, OUTPUT);   // We will take permanent charge of the bus hold request line
   digitalWrite(HLDRQ, BUS_RELEASE);     // Let the V20 keep the bus for now
 
   pinMode(HLDAK, INPUT);    // We will need to check that the V20 gives up the bus
   
+  pinMode(ASTB, OUTPUT);    // We are driving an OR gate input with our ASTB and V20's ASTB
+  digitalWrite(ASTB, LOW);  // Not strobing right now.
+
   pinMode(LED_BUILTIN, OUTPUT); // We'll also be lighting up the Teensy's LED
 
   // Set up the SD card to accept our dumped data
@@ -289,14 +328,14 @@ void loop() {
   Serial.println("\n\nHit Enter to dump the entire address space to a file.");
   while (!Serial.available() || Serial.read() != '\n');
 
-  Serial.print("Seizing the bus ... ");
-  digitalWrite(HLDRQ, BUS_HOLD);
-  while (digitalRead(HLDAK) != BUS_ACK);
-  Serial.println("ok");
+  // Serial.print("Seizing the bus ... ");
+  // digitalWrite(HLDRQ, BUS_HOLD);
+  // while (digitalRead(HLDAK) != BUS_ACK);
+  // Serial.println("ok");
 
-  digitalWrite(LED_BUILTIN, HIGH);    // a little feedback on the hardware
+  // digitalWrite(LED_BUILTIN, HIGH);    // a little feedback on the hardware
 
-  bus_state_driven_idle();  // take over the control signals on the bus
+  // bus_state_driven_idle();  // take over the control signals on the bus
 
   // Create a new empty data dump file on the SD card
   dumpfile = sd.open(filename, FILE_WRITE);
@@ -310,7 +349,8 @@ void loop() {
 
   // Do the actual data dump, writing the results in raw binary to the file
   for (unsigned long addr=0; addr <= 0xFFFFFul; addr++) {
-    dumpfile.write(bus_read_cycle(addr));   // ignoring any errors here.
+    dumpfile.write(bus_read_dma_cycle(addr));   // ignoring any errors here.
+    delayMicroseconds(20);    // give the V20 time to do some work
   }
 
   // Try to close out the dump file, checking for errors.
@@ -320,14 +360,14 @@ void loop() {
     // don't panic. Maybe it's safe to try again?
   }
 
-  // Release the bus to the V20
-  Serial.print("Releasing the bus ... ");
-  bus_state_not_driven();
-  digitalWrite(HLDRQ, BUS_RELEASE);
-  while (digitalRead(HLDAK) == BUS_ACK);
-  Serial.println("ok");
+  // // Release the bus to the V20
+  // Serial.print("Releasing the bus ... ");
+  // bus_state_not_driven();
+  // digitalWrite(HLDRQ, BUS_RELEASE);
+  // while (digitalRead(HLDAK) == BUS_ACK);
+  // Serial.println("ok");
 
-  digitalWrite(LED_BUILTIN, LOW);    // a little feedback on the hardware
+  // digitalWrite(LED_BUILTIN, LOW);    // a little feedback on the hardware
 
   // Inform the user of completion and provide the filename
   Serial.print("Memory dumped to file ");
